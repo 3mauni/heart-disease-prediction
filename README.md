@@ -41,6 +41,12 @@ The model evaluates patient risk using classification techniques and performance
 - images/ → Visualizations (to be added)  
 - output/ → Model results (to be added)
 
+## Project Output
+
+You can view the full analysis and model output here:
+
+[View Report](heart-disease-report.html)
+
 ## Key Highlights
 
 - Built an end-to-end ML pipeline

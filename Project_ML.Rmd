@@ -1,0 +1,1209 @@
+---
+title: "PROJECT: HEART DISEASE PREDICTION USING MACHINE LEARNING"
+output: html_document
+date: "2025-04-29"
+---
+
+# Heart Disease Prediction using Machine Learning
+
+**Import all relevant libraries**
+
+```{r}
+library(dplyr)
+library(caret)
+library(ggplot2)
+library(ggcorrplot)
+library(glmnet)
+library(mltools)
+library(data.table)
+library(keras)
+library(tfruns)
+library(tidyr)
+library(GGally)
+library(corrplot)
+library(vimp)
+library(graphics)
+library(pROC)
+```
+
+**1. Explore the overall structure of the data**
+
+First read the data
+
+```{r}
+heart_data = read.csv('heart_disease_uci.csv')
+head(heart_data)
+```
+
+**1.1 Check the structure of the data**
+
+```{r}
+str(heart_data)
+```
+
+**1.2 Summary of the data**
+
+```{r}
+# Summary of the data
+summary(heart_data)
+```
+
+The dataset includes variables such as:
+
+> `age`: Age in years
+>
+> `sex`: (1 = male, 0 = female)
+>
+> `cp`: Chest pain type (4 categories)
+>
+> `trestbps`: Resting blood pressure (mm Hg)
+>
+> `chol`: Serum cholesterol (mg/dl)
+>
+> `fbs`: Fasting blood sugar \> 120 mg/dl (1 = true, 0 = false)
+>
+> `restecg`: Resting electrocardiographic results (3 categories)
+>
+> `thalach`: Maximum heart rate achieved
+>
+> `exang`: Exercise-induced angina (1 = yes, 0 = no)
+>
+> `oldpeak`: ST depression induced by exercise
+>
+> `slope`: Slope of the peak exercise ST segment (3 categories)
+>
+> `ca`: Number of major vessels (0-3) colored by fluoroscopy
+>
+> `thal`: Thalassemia condition (3 categories)
+>
+> `num`: Target (0 = no heart disease, 1, 2, 3, 4 = heart disease)
+
+```{r}
+dim(heart_data)
+```
+
+**1.3 Check for missing values**
+
+```{r}
+# Calculate the number of missing values per column
+null_counts <- colSums(is.na(heart_data))
+
+# Create a data frame for plotting
+null_df <- data.frame(
+  Column = names(null_counts),
+  Missing_Values = as.numeric(null_counts)
+)
+
+# Filter out columns with zero missing values (optional, for cleaner plot)
+null_df <- null_df[null_df$Missing_Values > 0, ]
+
+null_df
+```
+
+```{r}
+# Create a bar plot of missing values
+ggplot(data = null_df, aes(x = reorder(Column, -Missing_Values), y = Missing_Values, fill = Column)) +
+  geom_bar(stat = "identity") +
+  scale_fill_viridis_d() +
+  labs(
+    title = "Missing Values by Column in Heart Disease Dataset",
+    x = "Column",
+    y = "Number of Missing Values"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+```
+
+**2. Exploratory Data Analysis**
+
+**2.1 Target Distribution**
+
+The target variable has 5 classes:
+
+-   **0**: No heart disease
+
+-   **1**: Mild heart disease
+
+-   **2**: Moderate heart disease
+
+-   **3**: Severe heart disease
+
+-   **4**: Very severe heart disease
+
+We will check how many patients belong to each class to understand the overall class distribution in the dataset.
+
+```{r}
+# Distribution of the target variable (num, 5 classes)
+target_counts <- table(heart_data$num)
+cat("Target Variable Distribution:\n")
+print(target_counts)
+
+```
+
+```{r}
+ggplot(data = heart_data, aes(x = as.factor(num), fill = as.factor(num))) +
+  geom_bar() +
+  scale_fill_viridis_d() +
+  labs(
+    title = "Distribution of Heart Disease Severity (Target Variable)",
+    x = "Severity Classes (0 = No Heart Disease, 1-4 = Severity Levels)",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+**2.2 Number of Patients in Each Class**
+
+Check number of patients in each class.
+
+```{r}
+# Count of patients with and without heart disease
+num_with_disease <- sum(heart_data$num %in% c(1, 2, 3, 4))
+num_without_disease <- sum(heart_data$num == 0)
+
+# Display the count of patients with and without heart disease
+cat("### Count of Patients with and without Heart Disease ###\n")
+cat("Number of patients with heart disease:", num_with_disease, "\n")
+cat("Number of patients without heart disease:", num_without_disease, "\n\n")
+
+# Total number of patients in the dataset
+total <- nrow(heart_data)
+
+# Distribution of the target variable
+target_counts <- table(heart_data$num)
+
+# Display the distribution of the target variable with percentages
+cat("Target Variable Distribution (Heart Disease Severity Classes) \n")
+for (class_label in names(target_counts)) {
+  count <- target_counts[class_label]
+  percentage <- (count / total) * 100
+  cat(sprintf("Class %s: %d patients (%.2f%%)\n", class_label, count, percentage))
+}
+```
+
+This shows that the data is imbalanced. To address this we can follow two approaches
+
+1.  First one is to use the SMOTE and it will help us increase the minority samples
+
+2.  In second one we can combine all of the abormal types to a single category and make this problem a binary classification.
+
+**3. Demographic Insights (`Age` and `Gender`)**
+
+**3.1 Age**
+
+```{r}
+min_age <- min(heart_data$age, na.rm = TRUE)
+max_age <- max(heart_data$age, na.rm = TRUE)
+age_range <- max_age - min_age
+
+# Display the age range
+cat(" Age Range of Patients\n")
+cat("Minimum age:", min_age, "\n")
+cat("Maximum age:", max_age, "\n")
+cat("Age range:", age_range, "years\n\n")
+```
+
+```{r}
+# Mean, median, and mode of age column
+age_mean <- mean(heart_data$age, na.rm = TRUE)
+age_median <- median(heart_data$age, na.rm = TRUE)
+age_mode <- as.numeric(names(sort(table(heart_data$age), decreasing = TRUE)[1]))
+
+# Display mean, median, and mode
+cat("Mean:", age_mean, "\n")
+cat("Median:", age_median, "\n")
+cat("Mode:", age_mode, "\n\n")
+
+# Histogram of age with mean, median, and mode lines
+library(ggplot2)
+ggplot(data = heart_data, aes(x = age)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "lightblue", color = "black") +
+  geom_density(alpha = 0.2, fill = "blue") +
+  geom_vline(aes(xintercept = age_mean), color = "red", linetype = "dashed") +
+  geom_vline(aes(xintercept = age_median), color = "green", linetype = "dashed") +
+  geom_vline(aes(xintercept = age_mode), color = "blue", linetype = "dashed") +
+  labs(
+    title = "Age Distribution of Patients",
+    x = "Age",
+    y = "Density"
+  ) +
+  theme_minimal()
+```
+
+The 49-year age range (28 to 77 years) reflects a diverse patient population, critical for understanding heart disease risk across age groups.
+
+This broad span suggests models must account for varying age-related risk factors.
+
+**3.2 Gender**
+
+```{r}
+# Assuming sex is coded as "Male"/"Female" or "M"/"F"; adjust if coded as 1/0
+gender_counts <- table(heart_data$sex)
+
+# Display gender distribution
+cat("### Gender Distribution of the Patients ###\n")
+cat("Male patients:", gender_counts[["Male"]] %||% gender_counts[["M"]], "\n")
+cat("Female patients:", gender_counts[["Female"]] %||% gender_counts[["F"]], "\n\n")
+
+```
+
+```{r}
+# Bar plot for gender distribution
+ggplot(data = heart_data, aes(x = sex, fill = sex)) +
+  geom_bar() +
+  scale_fill_manual(values = c("Male" = "#66C2A5", "Female" = "#FC8D62")) +
+  labs(
+    title = "Gender Distribution of Patients",
+    x = "Gender",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Histogram of age by gender
+ggplot(data = heart_data, aes(x = age, fill = sex)) +
+  geom_histogram(position = "dodge", bins = 30) +
+  scale_fill_manual(values = c("Male" = "#66C2A5", "Female" = "#FC8D62")) +
+  labs(
+    title = "Age Distribution by Gender",
+    x = "Age",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+The predominance of male patients (726 vs. 194 females) highlights a gender imbalance that may influence model performance.
+
+Further analysis is needed to assess if heart disease patterns differ by gender in this dataset.
+
+**4. Health Metrics**
+
+```{r}
+# Calculate average and median values for resting blood pressure (trestbps)
+avg_trestbps <- mean(heart_data$trestbps, na.rm = TRUE)
+median_trestbps <- median(heart_data$trestbps, na.rm = TRUE)
+
+# Calculate average and median values for serum cholesterol (chol)
+avg_chol <- mean(heart_data$chol, na.rm = TRUE)
+median_chol <- median(heart_data$chol, na.rm = TRUE)
+
+# Calculate average and median values for maximum heart rate achieved (thalch)
+avg_thalach <- mean(heart_data$thalch, na.rm = TRUE)
+median_thalach <- median(heart_data$thalch, na.rm = TRUE)
+
+# Display the results
+cat("Health Metrics\n")
+cat(sprintf("Average Resting Blood Pressure (trestbps): %.2f\n", avg_trestbps))
+cat(sprintf("Median Resting Blood Pressure (trestbps): %.0f\n", median_trestbps))
+cat(sprintf("Average Serum Cholesterol (chol): %.2f\n", avg_chol))
+cat(sprintf("Median Serum Cholesterol (chol): %.0f\n", median_chol))
+cat(sprintf("Average Maximum Heart Rate Achieved (thalch): %.2f\n", avg_thalach))
+cat(sprintf("Median Maximum Heart Rate Achieved (thalch): %.0f\n\n", median_thalach))
+
+```
+
+```{r}
+# Combine relevant columns for plotting
+health_metrics <- heart_data[, c("trestbps", "chol", "thalch")]
+
+# Reshape data to long format for boxplot
+health_metrics_long <- pivot_longer(health_metrics, cols = everything(), names_to = "Metric", values_to = "Value")
+
+# Create the boxplot
+ggplot(data = health_metrics_long, aes(x = Metric, y = Value, fill = Metric)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("trestbps" = "#66C2A5", "chol" = "#FC8D62", "thalch" = "#8DA0CB")) +
+  labs(
+    title = "Comparison of Health Metrics: Resting BP, Serum Cholesterol, and Max Heart Rate",
+    x = "Health Metrics",
+    y = "Values"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+**Resting Blood Pressure** **(trestbps)**: The average (132.13 mmHg) and median (130 mmHg) suggest a typical range, but numerous outliers indicate potential hypertension cases requiring closer examination.
+
+**Serum** **Cholesterol (chol)**: A lower average (199.13 mg/dl) than median (223 mg/dl) with many outliers points to a skewed distribution, highlighting patients with extreme cholesterol levels.
+
+**Maximum** **Heart Rate (thalch)**: The consistent average (137.55 bpm) and median (140 bpm) with fewer outliers suggest stable exercise responses across patients.
+
+**5. Categorical Features**
+
+**5.1 Exercise-Induced Angina (exang)**
+
+```{r}
+#Count of patients with exercise-induced angina (TRUE/FALSE)
+exang_counts <- table(heart_data$exang, useNA = "ifany")
+exang_percentage <- prop.table(exang_counts) * 100
+
+# Display counts and percentages for exercise-induced angina
+cat("Exercise-Induced Angina (exang)\n")
+cat(sprintf("Patients with exercise-induced angina (TRUE): %d (%.2f%%)\n", 
+            exang_counts["TRUE"], exang_percentage["TRUE"]))
+cat(sprintf("Patients without exercise-induced angina (FALSE): %d (%.2f%%)\n\n", 
+            exang_counts["FALSE"], exang_percentage["FALSE"]))
+```
+
+```{r}
+# Plot for Exercise-Induced Angina (exang)
+ggplot(data = heart_data, aes(x = exang, fill = exang)) +
+  geom_bar() +
+  scale_fill_manual(values = c("FALSE" = "#66C2A5", "TRUE" = "#FC8D62")) +
+  labs(
+    title = "Distribution of Exercise-Induced Angina",
+    x = "Exercise-Induced Angina (exang)",
+    y = "Number of Patients"
+  ) +
+  scale_x_discrete(labels = c("FALSE" = "No", "TRUE" = "Yes")) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Exercise-Induced Angina (exang):
+
+-   Over a third of patients (36.63%) experience exercise-induced angina, indicating its relevance as a risk factor.
+
+-   The majority (57.39%) do not have this symptom, suggesting varied clinical presentations.
+
+-   This distribution warrants further analysis to link exang with heart disease severity
+
+**5.2 Chest Pain Type (cp)**
+
+-   We will analyze the distribution of chest pain types. The categories are:
+
+    -   **0**: Typical Angina
+
+    -   **1**: Atypical Angina
+
+    -   **2**: Non-Anginal Pain
+
+    -   **3**: Asymptomatic
+
+```{r}
+# Count of patients in each chest pain type
+cp_counts <- table(heart_data$cp, useNA = "ifany")
+cp_percentage <- prop.table(cp_counts) * 100
+
+# Check unique values in cp column
+cat("Unique values in cp column:", unique(heart_data$cp), "\n\n")
+
+# Define chest pain labels (adjust based on actual data)
+cp_labels <- c(
+  "typical angina" = "Typical Angina",
+  "atypical angina" = "Atypical Angina",
+  "non-anginal" = "Non-Anginal Pain",
+  "asymptomatic" = "Asymptomatic"
+)
+
+# Display counts and percentages for chest pain types
+cat("Chest Pain Type (cp)\n")
+for (label in names(cp_counts)) {
+  if (label %in% names(cp_labels)) {
+    cat(sprintf("%s: %d patients (%.2f%%)\n", 
+                cp_labels[label], cp_counts[label], cp_percentage[label]))
+  } else {
+    cat(sprintf("Unexpected label %s: %d patients (%.2f%%)\n", 
+                label, cp_counts[label], cp_percentage[label]))
+  }
+}
+```
+
+```{r}
+# Plot for Chest Pain Type (cp)
+ggplot(data = heart_data, aes(x = cp, fill = cp)) +
+  geom_bar() +
+  scale_fill_manual(values = c("typical angina" = "#66C2A5", 
+                              "atypical angina" = "#FC8D62", 
+                              "non-anginal" = "#8DA0CB", 
+                              "asymptomatic" = "#E78AC3")) +
+  labs(
+    title = "Distribution of Chest Pain Types",
+    x = "Chest Pain Type (cp)",
+    y = "Number of Patients"
+  ) +
+  scale_x_discrete(labels = cp_labels) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Chest Pain Type (cp):
+
+-   Asymptomatic chest pain dominates (53.91%), potentially complicating diagnosis without other symptoms.
+
+-   Non-anginal and atypical angina are less common, highlighting diverse pain profiles.
+
+-   Standardizing cp labels is critical to ensure reliable modeling and interpretation.
+
+**5. Imputing missing Values**
+
+```{r}
+# The following code segment is generated Using AI using the prompt:
+# provide a complete code of imputing missing values. Use Mice imputation where the missing values is greater than 30% in any of the column. 
+# Ensure heart_data is loaded
+# heart_data <- read.csv("heart_disease_data.csv") # Uncomment if needed
+
+# Install and load required packages
+if (!require(mice)) install.packages("mice")
+library(mice)
+
+# Function to calculate mode for categorical/binary variables
+get_mode <- function(x) {
+  ux <- unique(x[!is.na(x)])
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+# Step 1: Check initial missing values
+missing_counts <- colSums(is.na(heart_data))
+missing_cols <- names(missing_counts[missing_counts > 0])
+cat("Initial missing values:\n")
+print(missing_counts[missing_cols])
+
+# Step 2: Separate high and low missingness columns (>30% of 920 rows = 276)
+threshold <- 0.3 * nrow(heart_data)  # 30% of 920 ≈ 276
+high_missing_cols <- names(missing_counts[missing_counts > threshold])
+low_missing_cols <- names(missing_counts[missing_counts > 0 & missing_counts <= threshold])
+cat("\nHigh missingness (>30% or >", round(threshold), "):", high_missing_cols, "\n")
+cat("Low missingness (≤30% or ≤", round(threshold), "):", low_missing_cols, "\n\n")
+
+# Step 3: Impute low missingness columns
+continuous_low <- c("trestbps", "chol", "thalch", "oldpeak")
+binary_low <- c("fbs", "exang")
+categorical_low <- c("restecg")
+
+# Impute continuous variables with median
+for (var in continuous_low) {
+  if (var %in% names(heart_data) && any(is.na(heart_data[[var]]))) {
+    median_val <- median(heart_data[[var]], na.rm = TRUE)
+    heart_data[[var]][is.na(heart_data[[var]])] <- median_val
+    cat(sprintf("Imputed %s with median: %.2f\n", var, median_val))
+  }
+}
+
+# Impute binary variables with mode
+for (var in binary_low) {
+  if (var %in% names(heart_data) && any(is.na(heart_data[[var]]))) {
+    mode_val <- get_mode(heart_data[[var]])
+    heart_data[[var]][is.na(heart_data[[var]])] <- mode_val
+    cat(sprintf("Imputed %s with mode: %s\n", var, mode_val))
+  }
+}
+
+# Impute categorical variables with mode
+for (var in categorical_low) {
+  if (var %in% names(heart_data) && any(is.na(heart_data[[var]]))) {
+    mode_val <- get_mode(heart_data[[var]])
+    heart_data[[var]][is.na(heart_data[[var]])] <- mode_val
+    cat(sprintf("Imputed %s with mode: %s\n", var, mode_val))
+  }
+}
+
+# Step 4: Ensure slope and thal are factors for MICE
+if ("slope" %in% names(heart_data)) {
+  heart_data$slope <- as.factor(heart_data$slope)
+}
+if ("thal" %in% names(heart_data)) {
+  heart_data$thal <- as.factor(heart_data$thal)
+}
+
+# Step 5: Impute high missingness columns with MICE
+if (length(high_missing_cols) > 0) {
+  # Initialize MICE to get predictor matrix and methods
+  init <- mice(heart_data, maxit = 0)
+  meth <- init$method
+  pred_matrix <- init$predictorMatrix
+  
+  # Specify imputation methods for high-missingness columns based on their type
+  for (col in high_missing_cols) {
+    if (is.factor(heart_data[[col]]) || is.character(heart_data[[col]])) {
+      meth[col] <- "polyreg"  # Use polytomous regression for categorical
+    } else if (is.numeric(heart_data[[col]])) {
+      meth[col] <- "pmm"      # Use predictive mean matching for numeric
+    } else {
+      meth[col] <- ""         # Skip or add another method if needed
+    }
+  }
+  
+  # Ensure other variables are not imputed (only impute high missingness columns)
+  meth[setdiff(names(heart_data), high_missing_cols)] <- ""
+  
+  # Exclude id from predictors (non-predictive) if it exists
+  if ("id" %in% names(heart_data)) {
+    pred_matrix[, "id"] <- 0
+  }
+  
+  # Run MICE with verbose output for debugging
+  imputed_high <- mice(
+    heart_data,
+    m = 5,
+    method = meth,
+    predictorMatrix = pred_matrix,
+    seed = 123,
+    maxit = 10,
+    printFlag = TRUE
+  )
+  
+  # Replace high missingness columns with imputed values
+  heart_data[, high_missing_cols] <- complete(imputed_high)[, high_missing_cols]
+  cat("\nImputed high missingness columns with MICE:\n", high_missing_cols, "\n")
+}
+
+# Step 6: Verify imputation
+cat("\nMissing values after imputation:\n")
+print(colSums(is.na(heart_data)))
+
+# Save the imputed dataset (optional)
+# write.csv(heart_data, "heart_data_imputed.csv", row.names = FALSE)
+
+```
+
+```{r}
+# Remove the patient Id as it is not need for analysis
+heart_data <- heart_data[, !names(heart_data) %in% "id"]
+```
+
+**6. Target variable Transformation**
+
+As we saw in previous section that , our target variable `num` is categorical variable with multiple categories like 0, 1, 2, 3, 4 where 0 shows no disease and 1-4 show diseases with different categories. Now We want to make it binary, so we will assign a single category like 1 if `num` is either 1, 2, 3 or 4.
+
+```{r}
+# Original num: 0 = no disease, 1-4 = disease severity
+heart_data$num_binary <- ifelse(heart_data$num %in% c(1, 2, 3, 4), 1, 0)
+
+# Verify the transformation
+cat("Original num distribution:\n")
+print(table(heart_data$num))
+cat("\nNew binary num distribution:\n")
+print(table(heart_data$num_binary))
+```
+
+```{r}
+# Visualize the binary distribution
+ggplot(data = heart_data, aes(x = as.factor(num_binary), fill = as.factor(num_binary))) +
+  geom_bar() +
+  scale_fill_manual(values = c("0" = "#66C2A5", "1" = "#FC8D62"), 
+                    labels = c("No Disease", "Disease")) +
+  labs(
+    title = "Distribution of Binary Heart Disease Status",
+    x = "Heart Disease Status",
+    y = "Number of Patients"
+  ) +
+  scale_x_discrete(labels = c("0" = "No Disease", "1" = "Disease")) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Remove the patient Id as it is not need for analysis
+heart_data <- heart_data[, !names(heart_data) %in% "num"]
+```
+
+So after making it binary, the distribution now seems fine. So we don't need to oversample it for class imbalance.
+
+**7. Encoding Categorical variables**
+
+```{r}
+dummy <- dummyVars(" ~ sex + dataset + fbs + exang + cp + restecg + slope + thal + ca", data = heart_data)
+dummy_df <- predict(dummy, heart_data)
+heart_data <- cbind(heart_data[, !names(heart_data) %in% c("cp", "restecg", "slope", "thal", "ca")], dummy_df)
+```
+
+```{r}
+dim(heart_data)
+```
+
+**8. Data Splitting**
+
+split the data into 80% training and 20% testing
+
+```{r}
+inTrain <- createDataPartition(heart_data$num, p=0.8, list=FALSE)
+heart_train <- heart_data[inTrain, ]
+heart_test <- heart_data[-inTrain, ]
+```
+
+```{r}
+dim(heart_train)
+```
+
+```{r}
+dim(heart_test)
+```
+
+Further split the training data into 90% training and 10% validation
+
+```{r}
+set.seed(1)
+inTrainVal <- createDataPartition(heart_train$num, p=0.9, list=FALSE)
+heart_train_final <- heart_train[inTrainVal, ]
+heart_val <- heart_train[-inTrainVal, ]
+```
+
+**9. Create a benchmark model**
+
+```{r}
+# Create the Benchmark Classifier
+
+# Compute the majority class in the training data (heart_train_final)
+majority_class <- names(which.max(table(heart_train_final$num_binary)))
+cat("Majority class in the training data:", majority_class, "\n")
+
+# Create predictions that always predict the majority class
+benchmark_preds <- rep(majority_class, nrow(heart_train_final))
+
+# For evaluation, force the positive class to be "1" (assuming 1 = disease)
+benchmark_conf_matrix <- confusionMatrix(
+  as.factor(benchmark_preds), 
+  as.factor(heart_train_final$num_binary),
+  positive = "1"
+)
+
+cat("Benchmark Classifier Performance (Majority-Class Prediction):\n")
+print(benchmark_conf_matrix)
+
+# Compute Evaluation Metrics
+# Extract Accuracy from the confusion matrix
+accuracy <- benchmark_conf_matrix$overall["Accuracy"]
+
+# Extract precision and recall for the positive class:
+# - Precision (Pos Pred Value) is the proportion of predicted positives that are true positives.
+# - Recall (Sensitivity) is the proportion of actual positives that are correctly predicted.
+precision <- benchmark_conf_matrix$byClass["Pos Pred Value"]
+recall <- benchmark_conf_matrix$byClass["Sensitivity"]
+
+# Calculate the F1 Score (harmonic mean of precision and recall)
+if((precision + recall) == 0) {
+  f1 <- 0
+} else {
+  f1 <- 2 * (precision * recall) / (precision + recall)
+}
+
+
+# Compute ROC-AUC
+# For the ROC, we need predicted probabilities.
+# Since our benchmark always predicts the majority class,
+# assign probability 1 if majority_class is "1" (i.e., always predict disease), else 0.
+benchmark_probs <- if (majority_class == "1") rep(1, nrow(heart_train_final)) else rep(0, nrow(heart_train_final))
+
+# Compute ROC curve and AUC.
+# Specify the positive level as "1". Also, setting the levels explicitly ensures correct ordering.
+roc_obj <- roc(response = heart_train_final$num_binary, 
+               predictor = benchmark_probs, 
+               levels = c("0", "1"))
+auc_benchmark <- auc(roc_obj)
+
+
+# Print All Metrics
+
+cat("\n--- Benchmark Classifier Metrics ---\n")
+cat(sprintf("Accuracy : %.4f\n", accuracy))
+cat(sprintf("Precision: %.4f\n", precision))
+cat(sprintf("Recall   : %.4f\n", recall))
+cat(sprintf("F1 Score : %.4f\n", f1))
+cat(sprintf("ROC AUC  : %.4f\n", auc_benchmark))
+
+```
+
+**10. Train ML Model**
+
+**10.1 Lasso Regression**
+
+```{r}
+heart_train_final$num_binary <- as.factor(heart_train_final$num_binary)
+heart_test$num_binary <- as.factor(heart_test$num_binary)
+heart_val$num_binary <- as.factor(heart_val$num_binary)
+
+```
+
+```{r}
+set.seed(1)
+```
+
+```{r}
+# Define 5-fold cross-validation control for models (using Kappa as metric)
+ctrl <- trainControl(method = "cv", 
+                     number = 5, 
+                     verboseIter = TRUE)
+
+# Define training control with data normalization for SVM models (center & scale)
+train_control_norm <- trainControl(
+  method = "cv",
+  number = 5,
+  verboseIter = TRUE,
+  preProc = c("center", "scale")
+)
+```
+
+```{r}
+grid_lasso <- expand.grid(
+  alpha = 1,          # Lasso regression (elastic net mixing parameter)
+  lambda = seq(0.01, 1000, length = 100)  # Range of lambda values from 0.01 to 1000
+)
+```
+
+```{r}
+lasso_model <- train(num_binary ~ ., 
+                     data = heart_train_final, 
+                     method = "glmnet",
+                     trControl = ctrl,
+                     tuneGrid = grid_lasso,
+                     metric = "Kappa",
+                     family = "binomial"
+)
+
+```
+
+```{r}
+lasso_model
+```
+
+```{r}
+# Check the best lambda
+best_lambda_lasso <- lasso_model$bestTune$lambda
+cat("Best lambda for LASSO:", best_lambda_lasso, "\n")
+```
+
+**10.2 Ridge Regression**
+
+```{r}
+# Define tuning grid for Ridge (alpha = 0)
+grid_ridge <- expand.grid(alpha = 0, lambda = 10^seq(3, -2, length = 100))
+
+ridge_model <- train(num_binary ~ ., 
+                     data = heart_train_final, 
+                     method = "glmnet",
+                     trControl = ctrl,
+                     tuneGrid = grid_ridge,
+                     metric = "Kappa",
+                     family = "binomial"
+)
+
+```
+
+```{r}
+ridge_model
+```
+
+```{r}
+# Check the best lambda for Ridge
+best_lambda_ridge <- ridge_model$bestTune$lambda
+cat("Best lambda for Ridge:", best_lambda_ridge, "\n")
+```
+
+```{r}
+# Get coefficients for the best tuned Ridge model
+coefficients_ridge <- coef(ridge_model$finalModel, s = best_lambda_ridge)
+print(coefficients_ridge)
+```
+
+**10.3 Elastic Net Regression**
+
+```{r}
+# Define tuning grid for Elastic Net (alpha ranges from 0 to 1)
+grid_en <- expand.grid(alpha = seq(0, 1, by = 0.1), lambda = 10^seq(3, -2, length = 100))
+
+elastic_net_model <- train(num_binary ~ ., 
+                           data = heart_train_final, 
+                           method = "glmnet",
+                           trControl = ctrl,
+                           tuneGrid = grid_en,
+                           metric = "Kappa",
+                           family = "binomial"
+)
+```
+
+```{r}
+elastic_net_model
+```
+
+```{r}
+# Get best tuning parameters for Elastic Net
+best_alpha_en <- elastic_net_model$bestTune$alpha
+best_lambda_en <- elastic_net_model$bestTune$lambda
+cat("Best Alpha for Elastic Net:", best_alpha_en, "\n")
+cat("Best Lambda for Elastic Net:", best_lambda_en, "\n")
+
+```
+
+```{r}
+# Get coefficients for the best tuned Elastic Net model
+coefficients_en <- coef(elastic_net_model$finalModel, s = best_lambda_en)
+print(coefficients_en)
+```
+
+**10.4 Random Forest model**
+
+```{r}
+rf_model <- train(num_binary ~ ., 
+                  data = heart_train_final, 
+                  method = "rf",
+                  trControl = ctrl,
+                  importance = TRUE,   # Compute variable importance
+                  metric = "Kappa"
+)
+```
+
+```{r}
+rf_model
+```
+
+```{r}
+# Get and plot variable importance
+var_importance <- varImp(rf_model)
+print(var_importance)
+plot(var_importance)
+```
+
+**10.5 Gradient Boosting Model**
+
+```{r}
+gbm_model <- train(num_binary ~ ., 
+                   data = heart_train_final, 
+                   method = "gbm",
+                   trControl = ctrl,
+                   metric = "Kappa",
+                   verbose = FALSE
+)
+```
+
+```{r}
+gbm_model
+```
+
+**10.6 SVM Model**
+
+**10.6.1 SVM with Linear Kernel**
+
+```{r}
+svm_linear_model <- train(num_binary ~ ., 
+                          data = heart_train_final, 
+                          method = "svmLinear",
+                          trControl = train_control_norm,
+                          metric = "Kappa"
+)
+
+```
+
+```{r}
+svm_linear_model
+```
+
+**10.6.2 SVM with Radial Kernel**
+
+```{r}
+svm_radial_model <- train(num_binary ~ ., 
+                          data = heart_train_final, 
+                          method = "svmRadial",
+                          trControl = train_control_norm,
+                          metric = "Kappa"
+)
+
+```
+
+```{r}
+svm_radial_model
+```
+
+**11. Summary of all the models**
+
+```{r}
+# Combine models into a list for comparison
+models_list <- list(
+  LASSO = lasso_model,
+  RIDGE = ridge_model,
+  Elastic_Net = elastic_net_model,
+  Random_Forest = rf_model,
+  GBM = gbm_model,
+  SVM_Linear = svm_linear_model,
+  SVM_Radial = svm_radial_model
+)
+
+# Compare models using resamples
+model_resamples <- resamples(models_list)
+summary(model_resamples)
+```
+
+**12 Model Evaluations on test set**
+
+```{r}
+evaluate_model <- function(model, data, true_labels, model_name = "Model") {
+  # Generate predicted class labels
+  preds <- predict(model, newdata = data)
+  
+  # Generate predicted probabilities for class "1" (if supported)
+  if ("prob" %in% model$modelType || "prob" %in% names(model)) {
+    prob_preds <- predict(model, newdata = data, type = "prob")[, "1"]
+  } else {
+    prob_preds <- as.numeric(as.character(preds))
+  }
+  
+  # Confusion Matrix
+  cm <- confusionMatrix(preds, true_labels, positive = "1")
+  
+  # Extract Metrics
+  acc <- cm$overall["Accuracy"]
+  prec <- cm$byClass["Pos Pred Value"]
+  rec <- cm$byClass["Sensitivity"]
+  f1 <- if ((prec + rec) == 0) 0 else 2 * (prec * rec) / (prec + rec)
+  
+  # ROC AUC
+  roc_obj <- roc(response = true_labels, predictor = prob_preds, levels = c("0", "1"))
+  auc_val <- auc(roc_obj)
+  
+  # Print all
+  cat(sprintf("\n--- %s ---\n", model_name))
+  cat(sprintf("Accuracy : %.4f\n", acc))
+  cat(sprintf("Precision: %.4f\n", prec))
+  cat(sprintf("Recall   : %.4f\n", rec))
+  cat(sprintf("F1 Score : %.4f\n", f1))
+  cat(sprintf("ROC AUC  : %.4f\n", auc_val))
+}
+
+```
+
+```{r}
+# Set factor levels just in case
+heart_test$num_binary <- factor(heart_test$num_binary, levels = c("0", "1"))
+
+# Evaluate Models on the Test Set
+evaluate_model(lasso_model, heart_test, heart_test$num_binary, "LASSO Regression")
+evaluate_model(ridge_model, heart_test, heart_test$num_binary, "Ridge Regression")
+evaluate_model(elastic_net_model, heart_test, heart_test$num_binary, "Elastic Net Regression")
+evaluate_model(rf_model, heart_test, heart_test$num_binary, "Random Forest")
+evaluate_model(gbm_model, heart_test, heart_test$num_binary, "Gradient Boosting")
+evaluate_model(svm_linear_model, heart_test, heart_test$num_binary, "SVM Linear")
+evaluate_model(svm_radial_model, heart_test, heart_test$num_binary, "SVM Radial")
+
+```
+
+**13. Neural Network Model**
+
+**13.1 Scale Numerical Columns**
+
+```{r}
+num_vars <- c("age", "trestbps", "chol", "thalch", "oldpeak")
+train_means <- colMeans(heart_train_final[, num_vars])
+train_sds <- apply(heart_train_final[, num_vars], 2, sd)
+
+heart_train_final[, num_vars] <- scale(heart_train_final[, num_vars], center=train_means, scale=train_sds)
+heart_val[, num_vars] <- scale(heart_val[, num_vars], center=train_means, scale=train_sds)
+heart_test[, num_vars] <- scale(heart_test[, num_vars], center=train_means, scale=train_sds)
+```
+
+**13.2 Prepare data for NN Model**
+
+```{r}
+X_train <- subset(heart_train_final, select = -num_binary)
+y_train <- heart_train_final$num_binary
+
+X_val <- subset(heart_val, select = -num_binary)
+y_val <- heart_val$num_binary
+
+X_test <- subset(heart_test, select = -num_binary)
+y_test <- heart_test$num_binary
+```
+
+```{r}
+# Convert feature sets to numeric matrices using model.matrix (remove intercept)
+X_train_mat <- model.matrix(~ . - 1, data = X_train)
+X_val_mat   <- model.matrix(~ . - 1, data = X_val)
+X_test_mat  <- model.matrix(~ . - 1, data = X_test)
+
+# Confirm that the matrices are numeric
+str(X_train_mat)
+
+# If your target variables are factors (e.g., "0", "1"), convert them to numeric
+y_train_numeric <- as.numeric(as.character(y_train))
+y_val_numeric   <- as.numeric(as.character(y_val))
+y_test_numeric  <- as.numeric(as.character(y_test))
+```
+
+```{r}
+cat("X_train dimensions:", dim(X_train), "\n")
+cat("y_train length:", length(y_train), "\n\n")
+
+cat("X_val dimensions:", dim(X_val), "\n")
+cat("y_val length:", length(y_val), "\n\n")
+
+cat("X_test dimensions:", dim(X_test), "\n")
+cat("y_test length:", length(y_test), "\n")
+```
+
+**13.3 Simple Neural Network Model**
+
+```{r}
+model <- keras_model_sequential() %>% 
+  # Hidden layer 1: Input shape is the number of columns in X_train_mat
+  layer_dense(units = 128, activation = "relu", input_shape = dim(X_train_mat)[2]) %>%
+  layer_dropout(rate = 0.3) %>%
+  
+  # Hidden layer 2
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dropout(rate = 0.4) %>% 
+  
+  # Hidden layer 3
+  layer_dense(units = 64, activation = "relu") %>% 
+  layer_dropout(rate = 0.4) %>% 
+  
+  # Output layer: one unit for binary classification using sigmoid activation
+  layer_dense(units = 1, activation = "sigmoid")
+
+# Compile the model with binary cross-entropy loss and Adam optimizer
+model %>% compile(
+  loss = "binary_crossentropy", 
+  optimizer = optimizer_adam(),
+  metrics = c("accuracy")
+)
+
+# Display model summary
+summary(model)
+```
+
+```{r}
+history <- model %>% fit(
+  X_train_mat, 
+  y_train_numeric, 
+  batch_size = 64, 
+  epochs = 20, 
+  validation_data = list(X_val_mat, y_val_numeric), 
+  callbacks = list(callback_early_stopping(monitor = "loss", patience = 10, restore_best_weights = TRUE))
+)
+```
+
+```{r}
+plot(history)
+```
+
+**13.4 Tuning the hyper-parameters**
+
+```{r}
+# Define hyperparameter grid for tuning
+params <- list(
+  learning_rate = c(0.0001, 0.001, 0.01),
+  dropout1 = c(0.3, 0.4, 0.5),
+  dropout2 = c(0.3, 0.4, 0.5),
+  dropout3 = c(0.3, 0.4, 0.5),
+  neurons1 = c(64, 128, 256),
+  neurons2 = c(64, 128, 256),
+  neurons3 = c(64, 128, 256),
+  l2 = c(0.0001, 0.001, 0.01)
+)
+
+# Run tuning (adjust sample % as needed)
+set.seed(1)
+runs <- tuning_run("tuning_script_nn.R", flags = params, sample = 0.001)
+```
+
+```{r}
+print(runs)
+```
+
+```{r}
+view_run(runs$run_dir[3])  
+```
+
+Following are the best hyperparameters after tuning:
+
+|  **Hyperparameter**                |  **Value**                         |
+|------------------------------------|------------------------------------|
+|  learning_rate                     |  0.01                              |
+|  dropout1                          |  0.3                               |
+|  dropout2                          |  0.5                               |
+|  dropout3                          |  0.5                               |
+|  neurons1                          |  64                                |
+|  neurons2                          |  64                                |
+|  neurons3                          |  256                               |
+|  l2                                |  0.0001                            |
+|  optimizer                         |  RMSprop                           |
+|  epochs                            |  10                                |
+
+**13.5 Retrain the best model on combined data**
+
+```{r}
+# Train final model on combined training + validation data
+X_combined <- rbind(X_train_mat, X_val_mat)
+y_combined <- c(y_train_numeric, y_val_numeric)
+
+```
+
+```{r}
+final_model <- keras_model_sequential() %>% 
+  layer_dense(
+    units = 64, 
+    activation = "relu", 
+    input_shape = dim(X_combined)[2],
+    kernel_regularizer = regularizer_l2(l = 0.0001)
+  ) %>%
+  layer_dropout(rate = 0.3) %>%
+  
+  layer_dense(
+    units = 64, 
+    activation = "relu"
+  ) %>%
+  layer_dropout(rate = 0.5) %>%
+  
+  layer_dense(
+    units = 256, 
+    activation = "relu"
+  ) %>%
+  layer_dropout(rate = 0.5) %>%
+  
+  layer_dense(units = 1, activation = "sigmoid")
+
+# Compile the model with the tuned learning rate and optimizer
+final_model %>% compile(
+  loss = "binary_crossentropy", 
+  optimizer = optimizer_rmsprop(learning_rate = 0.01),
+  metrics = c("accuracy")
+)
+
+# Train the model using the combined data
+history_final <- final_model %>% fit(
+  X_combined, 
+  y_combined, 
+  batch_size = 64, 
+  epochs = 10,  # Based on tuning result
+  callbacks = list(callback_early_stopping(monitor = "loss", patience = 10, restore_best_weights = TRUE))
+)
+
+```
+
+**13.6 Print all the metrics for NN Model**
+
+```{r}
+# Predict on test set
+pred_probs <- final_model %>% predict(X_test_mat)
+predictions <- ifelse(pred_probs > 0.5, 1, 0)
+
+# Confusion matrix and metrics
+conf_matrix <- confusionMatrix(
+  factor(predictions, levels = c(0,1)),
+  factor(y_test_numeric, levels = c(0,1))
+)
+
+accuracy <- conf_matrix$overall['Accuracy']
+precision <- conf_matrix$byClass['Precision']
+recall <- conf_matrix$byClass['Recall']
+f1_score <- conf_matrix$byClass['F1']
+
+# Print metrics
+print(conf_matrix)
+cat("\nAccuracy:", accuracy)
+cat("\nPrecision:", precision)
+cat("\nRecall:", recall)
+cat("\nF1 Score:", f1_score)
+
+# ROC and AUC
+roc_obj <- roc(as.numeric(as.character(y_test)), as.numeric(pred_probs))
+auc_value <- auc(roc_obj)
+cat("\nAUC:", auc_value, "\n")
+
+```
+
+```{r}
+plot(roc_obj, col = "darkred", lwd = 2, main = "Neural Network ROC Curve")
+```
